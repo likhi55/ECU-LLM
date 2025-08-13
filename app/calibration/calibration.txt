@@ -1,4 +1,2 @@
-# Calibration settings (SCR000001)
-# No tunables for ignition; reserved for future use.
-
 max_engine_speed = 2000
+brake_gain_rpm_per_deg = 4
