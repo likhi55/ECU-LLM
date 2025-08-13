@@ -43,11 +43,11 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(out_path, "w");
     if (!fout) { perror("open output"); fclose(fin); return 4; }
 
-    // --- Calibration ---
-    // Allow override via env, else default to app/calibration/calibration.txt (when executed from repo root)
+    // --- Calibrations (SCR2 + SCR3) ---
     const char *calib_env = getenv("ECU_CALIB_PATH");
     const char *calib_path = (calib_env && calib_env[0]) ? calib_env : "app/calibration/calibration.txt";
     int max_engine_speed = parse_max_engine_speed(calib_path, 2000);
+    int brake_gain = parse_brake_gain(calib_path, 4);
 
     char line[MAX_LINE];
     char *cols[MAX_COLS];
@@ -58,53 +58,51 @@ int main(int argc, char *argv[]) {
         fclose(fin); fclose(fout);
         return 5;
     }
-
     int hcols = split_csv(line, cols, MAX_COLS);
-    int time_idx = find_col(cols, hcols, "time"); // optional
-    int ign_idx  = find_col(cols, hcols, "ignition_switch");
-    int acc_idx  = find_col(cols, hcols, "acc_pedal_position"); // SCR2
+    int time_idx  = find_col(cols, hcols, "time");
+    int ign_idx   = find_col(cols, hcols, "ignition_switch");
+    int acc_idx   = find_col(cols, hcols, "acc_pedal_position");    // SCR2
+    int brake_idx = find_col(cols, hcols, "brake_pedal_position");  // SCR3
 
     if (ign_idx < 0) {
         fprintf(stderr, "input header must contain 'ignition_switch'\n");
         fclose(fin); fclose(fout);
         return 6;
     }
-    // acc_pedal_position missing → treat as 0 acceleration
+    // acc/brake missing → treated as 0
 
-    // --- Output header (SCR2 adds engine_speed) ---
+    // --- Output header (unchanged from SCR2) ---
     fprintf(fout, "time,engine_state,engine_speed\n");
 
     long tgen = 0;
-    int engine_speed = 0; // state across rows
+    int engine_speed = 0;
 
-    // --- Process rows ---
+    // --- Rows ---
     while (fgets(line, sizeof(line), fin)) {
         int n = split_csv(line, cols, MAX_COLS);
         if (n == 0) continue;
 
-        // time (generate if absent)
         long t = tgen;
-        if (time_idx >= 0 && time_idx < n && cols[time_idx][0] != '\0') {
+        if (time_idx >= 0 && time_idx < n && cols[time_idx][0] != '\0')
             t = strtol(cols[time_idx], NULL, 10);
-        }
 
-        // ignition
         int ign = 0;
-        if (ign_idx < n && cols[ign_idx][0] != '\0') {
+        if (ign_idx < n && cols[ign_idx][0] != '\0')
             ign = (int)strtol(cols[ign_idx], NULL, 10);
-        }
         int engine_state = compute_engine_state(ign);
 
-        // accelerator pedal (deg)
         int acc_deg = 0;
-        if (acc_idx >= 0 && acc_idx < n && cols[acc_idx][0] != '\0') {
+        if (acc_idx >= 0 && acc_idx < n && cols[acc_idx][0] != '\0')
             acc_deg = (int)strtol(cols[acc_idx], NULL, 10);
-        }
 
-        // SCR2 speed update
-        engine_speed = update_engine_speed(engine_state, acc_deg, engine_speed, max_engine_speed);
+        int brake_deg = 0;
+        if (brake_idx >= 0 && brake_idx < n && cols[brake_idx][0] != '\0')
+            brake_deg = (int)strtol(cols[brake_idx], NULL, 10);
 
-        // emit
+        engine_speed = update_engine_speed(
+            engine_state, acc_deg, brake_deg, engine_speed, max_engine_speed, brake_gain
+        );
+
         fprintf(fout, "%ld,%d,%d\n", t, engine_state, engine_speed);
         tgen++;
     }
