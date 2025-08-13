@@ -1,2 +1,4 @@
 # Calibration settings (SCR000001)
 # No tunables for ignition; reserved for future use.
+
+max_engine_speed = 2000
