@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include "ecu.h"
 
+#define ACC_BASE_GAIN_RPM_PER_DEG 2.0  // SCR2 base gain
+
 static int clamp_int(int v, int lo, int hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
@@ -50,30 +52,65 @@ int parse_brake_gain(const char *calib_path, int fallback_gain) {
     return gain;
 }
 
+// ---------- SCR4 ----------
+int parse_gear_multipliers(const char *calib_path, double gear_mult[6]) {
+    // defaults
+    gear_mult[0] = 0.0;   // unused
+    gear_mult[1] = 0.60;
+    gear_mult[2] = 0.85;
+    gear_mult[3] = 1.00;
+    gear_mult[4] = 1.10;
+    gear_mult[5] = 1.20;
+
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        double v;
+        if (sscanf(line, " gear_acc_multiplier_g1 %*[^0-9.-]%lf", &v) == 1) { gear_mult[1] = v; parsed++; continue; }
+        if (sscanf(line, " gear_acc_multiplier_g2 %*[^0-9.-]%lf", &v) == 1) { gear_mult[2] = v; parsed++; continue; }
+        if (sscanf(line, " gear_acc_multiplier_g3 %*[^0-9.-]%lf", &v) == 1) { gear_mult[3] = v; parsed++; continue; }
+        if (sscanf(line, " gear_acc_multiplier_g4 %*[^0-9.-]%lf", &v) == 1) { gear_mult[4] = v; parsed++; continue; }
+        if (sscanf(line, " gear_acc_multiplier_g5 %*[^0-9.-]%lf", &v) == 1) { gear_mult[5] = v; parsed++; continue; }
+    }
+    fclose(f);
+    return parsed;
+}
+
 int update_engine_speed(int engine_state,
-                        int acc_pedal_position_deg,
-                        int brake_pedal_position_deg,
-                        int prev_engine_speed_rpm,
-                        int max_engine_speed_rpm,
-                        int brake_gain_rpm_per_deg)
+                        int acc_deg,
+                        int brake_deg,
+                        int current_gear,
+                        int prev_speed_rpm,
+                        int max_speed_rpm,
+                        int brake_gain_rpm_per_deg,
+                        const double gear_mult[6])
 {
     if (engine_state == 0) {
-        // ignition OFF → speed forced to zero
-        return 0;
+        return 0; // ignition OFF
     }
 
-    // sanitize inputs
-    int acc   = clamp_int(acc_pedal_position_deg,   0, 45);
-    int brake = clamp_int(brake_pedal_position_deg, 0, 45);
-    int prev  = prev_engine_speed_rpm < 0 ? 0 : prev_engine_speed_rpm;
+    int acc   = clamp_int(acc_deg,   0, 45);
+    int brake = clamp_int(brake_deg, 0, 45);
+    int gear  = clamp_int(current_gear, 1, 5);
+    int prev  = (prev_speed_rpm < 0) ? 0 : prev_speed_rpm;
 
-    // SCR2 accel: +2 rpm per degree; SCR3 brake: -gain rpm per degree
-    long delta_acc = (long)acc * 2L;
-    long delta_brk = (long)brake * (long)brake_gain_rpm_per_deg;
-    long next = (long)prev + delta_acc - delta_brk;
+    // Acceleration scaled by gear
+    double gain_deg = ACC_BASE_GAIN_RPM_PER_DEG * gear_mult[gear];
+    double delta_acc = (double)acc * gain_deg;
 
-    if (next < 0) next = 0;
-    if (next > max_engine_speed_rpm) next = max_engine_speed_rpm;
+    // Brake deceleration
+    double delta_brk = (double)brake * (double)brake_gain_rpm_per_deg;
 
-    return (int)next;
+    // Next speed (rounded to nearest int after clamping)
+    double next_d = (double)prev + delta_acc - delta_brk;
+    if (next_d < 0.0) next_d = 0.0;
+    if (next_d > (double)max_speed_rpm) next_d = (double)max_speed_rpm;
+
+    int next_i = (int)(next_d + 0.5);  // round half up
+    if (next_i < 0) next_i = 0;
+    if (next_i > max_speed_rpm) next_i = max_speed_rpm;
+    return next_i;
 }

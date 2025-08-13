@@ -1,2 +1,9 @@
 max_engine_speed = 2000
 brake_gain_rpm_per_deg = 4
+
+# SCR4 gear multipliers (floats allowed)
+gear_acc_multiplier_g1 = 0.6
+gear_acc_multiplier_g2 = 0.85
+gear_acc_multiplier_g3 = 1.0
+gear_acc_multiplier_g4 = 1.1
+gear_acc_multiplier_g5 = 1.2
