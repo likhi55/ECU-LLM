@@ -23,9 +23,7 @@ static int split_csv(char *line, char *cols[], int maxcols) {
 }
 
 static int find_col(char *header_cols[], int ncols, const char *name) {
-    for (int i = 0; i < ncols; i++) {
-        if (strcmp(header_cols[i], name) == 0) return i;
-    }
+    for (int i = 0; i < ncols; i++) if (strcmp(header_cols[i], name) == 0) return i;
     return -1;
 }
 
@@ -43,13 +41,16 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(out_path, "w");
     if (!fout) { perror("open output"); fclose(fin); return 4; }
 
-    // --- Calibrations (SCR2/3/4) ---
+    // --- Calibrations (SCR2/3/4/5) ---
     const char *calib_env  = getenv("ECU_CALIB_PATH");
     const char *calib_path = (calib_env && calib_env[0]) ? calib_env : "app/calibration/calibration.txt";
     int max_engine_speed = parse_max_engine_speed(calib_path, 2000);
     int brake_gain       = parse_brake_gain(calib_path, 4);
     double gear_mult[6];
-    parse_gear_multipliers(calib_path, gear_mult); // fills defaults if keys missing
+    parse_gear_multipliers(calib_path, gear_mult);
+
+    double cc_kp; int cc_max_step, cc_gear_min, cc_tmin, cc_tmax;
+    parse_cc_params(calib_path, &cc_kp, &cc_max_step, &cc_gear_min, &cc_tmin, &cc_tmax);
 
     char line[MAX_LINE];
     char *cols[MAX_COLS];
@@ -60,21 +61,22 @@ int main(int argc, char *argv[]) {
         fclose(fin); fclose(fout);
         return 5;
     }
-    int hcols     = split_csv(line, cols, MAX_COLS);
-    int time_idx  = find_col(cols, hcols, "time");
-    int ign_idx   = find_col(cols, hcols, "ignition_switch");
-    int acc_idx   = find_col(cols, hcols, "acc_pedal_position");
-    int brk_idx   = find_col(cols, hcols, "brake_pedal_position");
-    int gear_idx  = find_col(cols, hcols, "current_gear");
+    int hcols      = split_csv(line, cols, MAX_COLS);
+    int time_idx   = find_col(cols, hcols, "time");
+    int ign_idx    = find_col(cols, hcols, "ignition_switch");
+    int acc_idx    = find_col(cols, hcols, "acc_pedal_position");
+    int brk_idx    = find_col(cols, hcols, "brake_pedal_position");
+    int gear_idx   = find_col(cols, hcols, "current_gear");
+    int cc_en_idx  = find_col(cols, hcols, "cruise_enable");        // SCR5
+    int cc_tgt_idx = find_col(cols, hcols, "cruise_target_speed");  // SCR5
 
     if (ign_idx < 0) {
         fprintf(stderr, "input header must contain 'ignition_switch'\n");
         fclose(fin); fclose(fout);
         return 6;
     }
-    // acc/brake/gear missing → treated as 0 (acc/brake) and 3 (gear)
 
-    // --- Output header (same as SCR2/3) ---
+    // --- Output header ---
     fprintf(fout, "time,engine_state,engine_speed\n");
 
     long tgen = 0;
@@ -86,29 +88,34 @@ int main(int argc, char *argv[]) {
         if (n == 0) continue;
 
         long t = tgen;
-        if (time_idx >= 0 && time_idx < n && cols[time_idx][0] != '\0')
-            t = strtol(cols[time_idx], NULL, 10);
+        if (time_idx >= 0 && time_idx < n && cols[time_idx][0]) t = strtol(cols[time_idx], NULL, 10);
 
         int ign = 0;
-        if (ign_idx < n && cols[ign_idx][0] != '\0')
-            ign = (int)strtol(cols[ign_idx], NULL, 10);
+        if (ign_idx < n && cols[ign_idx][0]) ign = (int)strtol(cols[ign_idx], NULL, 10);
         int engine_state = compute_engine_state(ign);
 
         int acc_deg = 0;
-        if (acc_idx >= 0 && acc_idx < n && cols[acc_idx][0] != '\0')
-            acc_deg = (int)strtol(cols[acc_idx], NULL, 10);
+        if (acc_idx >= 0 && acc_idx < n && cols[acc_idx][0]) acc_deg = (int)strtol(cols[acc_idx], NULL, 10);
 
         int brk_deg = 0;
-        if (brk_idx >= 0 && brk_idx < n && cols[brk_idx][0] != '\0')
-            brk_deg = (int)strtol(cols[brk_idx], NULL, 10);
+        if (brk_idx >= 0 && brk_idx < n && cols[brk_idx][0]) brk_deg = (int)strtol(cols[brk_idx], NULL, 10);
 
-        int gear = 3; // default mid gear if column absent
-        if (gear_idx >= 0 && gear_idx < n && cols[gear_idx][0] != '\0')
-            gear = (int)strtol(cols[gear_idx], NULL, 10);
+        int gear = 3;
+        if (gear_idx >= 0 && gear_idx < n && cols[gear_idx][0]) gear = (int)strtol(cols[gear_idx], NULL, 10);
 
-        engine_speed = update_engine_speed(
-            engine_state, acc_deg, brk_deg, gear,
-            engine_speed, max_engine_speed, brake_gain, gear_mult
+        int cc_en = 0;
+        if (cc_en_idx >= 0 && cc_en_idx < n && cols[cc_en_idx][0]) cc_en = (int)strtol(cols[cc_en_idx], NULL, 10);
+
+        int cc_tgt = 0;
+        if (cc_tgt_idx >= 0 && cc_tgt_idx < n && cols[cc_tgt_idx][0]) cc_tgt = (int)strtol(cols[cc_tgt_idx], NULL, 10);
+
+        engine_speed = update_engine_speed_cc(
+            engine_state,
+            acc_deg, brk_deg, gear,
+            engine_speed, max_engine_speed,
+            brake_gain, gear_mult,
+            cc_en, cc_tgt,
+            cc_kp, cc_max_step, cc_gear_min, cc_tmin, cc_tmax
         );
 
         fprintf(fout, "%ld,%d,%d\n", t, engine_state, engine_speed);
