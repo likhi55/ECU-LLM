@@ -1,16 +1,17 @@
+# Existing keys…
 max_engine_speed = 2000
 brake_gain_rpm_per_deg = 4
-
-# SCR4 gear multipliers
 gear_acc_multiplier_g1 = 0.6
 gear_acc_multiplier_g2 = 0.85
 gear_acc_multiplier_g3 = 1.0
 gear_acc_multiplier_g4 = 1.1
 gear_acc_multiplier_g5 = 1.2
 
-# SCR5 cruise control
 cc_kp = 0.2
 cc_max_step_per_iter = 30
 cc_activation_gear_min = 3
 cc_target_min = 300
 cc_target_max = 2000
+
+# SCR6 coastdown
+drag_rpm_per_iter = 5

@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(out_path, "w");
     if (!fout) { perror("open output"); fclose(fin); return 4; }
 
-    // --- Calibrations (SCR2/3/4/5) ---
+    // --- Calibrations (SCR2..SCR6) ---
     const char *calib_env  = getenv("ECU_CALIB_PATH");
     const char *calib_path = (calib_env && calib_env[0]) ? calib_env : "app/calibration/calibration.txt";
     int max_engine_speed = parse_max_engine_speed(calib_path, 2000);
@@ -51,6 +51,8 @@ int main(int argc, char *argv[]) {
 
     double cc_kp; int cc_max_step, cc_gear_min, cc_tmin, cc_tmax;
     parse_cc_params(calib_path, &cc_kp, &cc_max_step, &cc_gear_min, &cc_tmin, &cc_tmax);
+
+    int drag_rpm = parse_drag_rpm_per_iter(calib_path, 5);
 
     char line[MAX_LINE];
     char *cols[MAX_COLS];
@@ -67,8 +69,8 @@ int main(int argc, char *argv[]) {
     int acc_idx    = find_col(cols, hcols, "acc_pedal_position");
     int brk_idx    = find_col(cols, hcols, "brake_pedal_position");
     int gear_idx   = find_col(cols, hcols, "current_gear");
-    int cc_en_idx  = find_col(cols, hcols, "cruise_enable");        // SCR5
-    int cc_tgt_idx = find_col(cols, hcols, "cruise_target_speed");  // SCR5
+    int cc_en_idx  = find_col(cols, hcols, "cruise_enable");
+    int cc_tgt_idx = find_col(cols, hcols, "cruise_target_speed");
 
     if (ign_idx < 0) {
         fprintf(stderr, "input header must contain 'ignition_switch'\n");
@@ -109,13 +111,14 @@ int main(int argc, char *argv[]) {
         int cc_tgt = 0;
         if (cc_tgt_idx >= 0 && cc_tgt_idx < n && cols[cc_tgt_idx][0]) cc_tgt = (int)strtol(cols[cc_tgt_idx], NULL, 10);
 
-        engine_speed = update_engine_speed_cc(
+        engine_speed = update_engine_speed_cc_drag(
             engine_state,
             acc_deg, brk_deg, gear,
             engine_speed, max_engine_speed,
             brake_gain, gear_mult,
             cc_en, cc_tgt,
-            cc_kp, cc_max_step, cc_gear_min, cc_tmin, cc_tmax
+            cc_kp, cc_max_step, cc_gear_min, cc_tmin, cc_tmax,
+            drag_rpm
         );
 
         fprintf(fout, "%ld,%d,%d\n", t, engine_state, engine_speed);
