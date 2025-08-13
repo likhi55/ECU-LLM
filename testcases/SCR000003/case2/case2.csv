@@ -1,0 +1,11 @@
+time,ignition_switch,acc_pedal_position,brake_pedal_position
+0,1,20,0
+1,1,20,0
+2,1,20,0
+3,1,20,0
+4,1,20,0
+5,1,0,30
+6,1,0,30
+7,1,0,30
+8,1,0,30
+9,1,0,30
