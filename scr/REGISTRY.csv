@@ -2,3 +2,4 @@ scr_id,title,path
 SCR000001,Implement ignition switch logic,scr/SCR000001.md
 SCR000002,Implement accelerator pedal logic,scr/SCR000002.md
 SCR000003,Implement brake pedal logic,scr/SCR000003.md
+SCR000004,Implement gear-based acceleration scaling,scr/SCR000004.md
