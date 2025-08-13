@@ -1,0 +1,19 @@
+name: "SCR Request"
+description: "Create a Software Change Request"
+title: "SCR??????: <short title>"
+labels: ["SCR","state: open"]
+body:
+  - type: input
+    id: scr_id
+    attributes:
+      label: "SCR ID"
+      placeholder: "SCR000001"
+    validations:
+      required: true
+  - type: textarea
+    id: desc
+    attributes:
+      label: "Description"
+      description: "What to build"
+    validations:
+      required: true

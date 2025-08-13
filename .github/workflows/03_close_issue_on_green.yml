@@ -1,0 +1,10 @@
+name: Close SCR Issue on Green
+on:
+  workflow_run:
+    workflows: ["Build & Test"]
+    types: [completed]
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Placeholder - will close SCR issues after SCR logic is added."
