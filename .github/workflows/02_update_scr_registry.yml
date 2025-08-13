@@ -1,8 +1,10 @@
 name: Update SCR Registry
 on:
   push:
+    branches: [ main ]
     paths:
       - 'scr/*.md'
+
 jobs:
   registry:
     runs-on: ubuntu-latest
@@ -10,16 +12,22 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      - name: Rebuild registry
+        run: |
           echo "scr_id,title,path" > scr/REGISTRY.csv
           for f in scr/SCR*.md; do
             title=$(head -n 1 "$f" | sed 's/# *//;s/,//g')
             id=$(basename "$f" .md)
             echo "$id,${title:-(no title)},$f" >> scr/REGISTRY.csv
           done
-      - run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add scr/REGISTRY.csv
-          git commit -m "chore: update SCR registry" || echo "No changes"
-          git push
+      - name: Commit changes
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git add scr/REGISTRY.csv
+            git commit -m "chore: update SCR registry"
+            git push
+          else
+            echo "No registry changes."
+          fi

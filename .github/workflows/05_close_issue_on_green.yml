@@ -1,0 +1,77 @@
+name: Close SCR Issue on Green (after PR merge)
+
+on:
+  workflow_run:
+    workflows: ["Build & Test"]
+    types: [completed]
+
+jobs:
+  close-issue:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Derive merged PR & SCR id from this main commit
+        id: derive
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = context.payload.workflow_run.head_sha;
+
+            // Find PR(s) associated with this commit
+            const prsResp = await github.rest.repos.listPullRequestsAssociatedWithCommit({ owner, repo, commit_sha: sha });
+            const prs = prsResp.data || [];
+            if (!prs.length) { core.setOutput('scr',''); return; }
+
+            // Ensure the PR is merged
+            const prNum = prs[0].number;
+            const pr = (await github.rest.pulls.get({ owner, repo, pull_number: prNum })).data;
+            if (!pr.merged) { core.setOutput('scr',''); return; }
+
+            // Extract SCR id from PR title/body/branch or commits
+            const re = /(SCR\d{6})/i;
+            let scr = (pr.title + '\n' + (pr.body || '') + '\n' + pr.head.ref).match(re)?.[1];
+            if (!scr) {
+              const commits = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: prNum, per_page: 100 });
+              for (const c of commits) {
+                const m = (c.commit.message || '').match(re);
+                if (m) { scr = m[1]; break; }
+              }
+            }
+            core.setOutput('scr', (scr || '').toUpperCase());
+            core.setOutput('pr', String(prNum));
+
+      - name: Mark done and close the SCR issue
+        if: ${{ steps.derive.outputs.scr != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const scr = "${{ steps.derive.outputs.scr }}";
+            const pr = "${{ steps.derive.outputs.pr }}";
+
+            const openIssues = await github.paginate(
+              github.rest.issues.listForRepo,
+              { owner, repo, state: 'open', labels: 'SCR', per_page: 100 }
+            );
+            const issue = openIssues.find(i => (i.title || '').includes(scr));
+            if (!issue) { core.notice(`No open issue for ${scr}.`); return; }
+
+            // Normalize state labels
+            for (const name of issue.labels.map(l => l.name)) {
+              if (name.startsWith('state:') && name !== 'state: done') {
+                try { await github.rest.issues.removeLabel({ owner, repo, issue_number: issue.number, name }); } catch {}
+              }
+            }
+
+            await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['state: done'] });
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: issue.number,
+              body: `Build & Test passed on **main** for PR #${pr}. Marking **done** and closing.`
+            });
+            await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed' });

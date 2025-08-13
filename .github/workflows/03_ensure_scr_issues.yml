@@ -1,0 +1,67 @@
+name: Ensure SCR Issues from Registry (after registry workflow)
+
+on:
+  workflow_run:
+    workflows: ["Update SCR Registry"]
+    types: [completed]
+
+jobs:
+  ensure-scr-issues:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Checkout the exact commit that updated the registry
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Create missing SCR issues from scr/REGISTRY.csv
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const fs = require('fs');
+
+            const csvPath = 'scr/REGISTRY.csv';
+            if (!fs.existsSync(csvPath)) { core.notice('No registry file'); return; }
+
+            const content = fs.readFileSync(csvPath, 'utf8').trim();
+            if (!content) { core.notice('Empty registry'); return; }
+
+            const rows = content.split('\n').slice(1); // skip header
+
+            // Fetch all SCR issues (open/closed)
+            const allIssues = await github.paginate(
+              github.rest.issues.listForRepo,
+              { owner, repo, state: 'all', labels: 'SCR', per_page: 100 }
+            );
+
+            for (const row of rows) {
+              if (!row.trim()) continue;
+              const [rawScr, rawTitle, rawPath] = row.split(',');
+              const scr = (rawScr || '').trim();
+              const titleCsv = (rawTitle || '').trim();
+              const mdPath = (rawPath || '').trim();
+              if (!/^SCR\d{6}$/.test(scr)) continue;
+
+              // Skip if already exists
+              if (allIssues.some(i => (i.title || '').includes(scr))) continue;
+
+              // Prefer H1 from MD if available; otherwise use CSV title
+              let title = titleCsv && titleCsv !== '(no title)' ? titleCsv : 'Change Request';
+              try {
+                const md = fs.readFileSync(mdPath, 'utf8');
+                const m = md.match(/^#\s*(.+)$/m);
+                if (m) title = m[1].replace(/,/g, '');
+              } catch (_) {}
+
+              await github.rest.issues.create({
+                owner, repo,
+                title: `${scr}: ${title}`,
+                body: `Auto-created from \`${mdPath}\` after **scr/REGISTRY.csv** update.`,
+                labels: ['SCR', 'state: open']
+              });
+            }
