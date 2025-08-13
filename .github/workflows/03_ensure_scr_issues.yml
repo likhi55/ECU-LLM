@@ -4,19 +4,29 @@ on:
   workflow_run:
     workflows: ["Update SCR Registry"]
     types: [completed]
+  workflow_dispatch: {}
 
 jobs:
   ensure-scr-issues:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # run when 02 finished successfully, or via manual dispatch
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout latest branch tip (not head_sha)
+        uses: actions/checkout@v4
         with:
-          # Checkout the exact commit that updated the registry
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: refs/heads/${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+
+      - name: Show registry (debug)
+        run: |
+          echo "---- scr/REGISTRY.csv ----"
+          sed -n '1,200p' scr/REGISTRY.csv || true
+          echo "--------------------------"
 
       - name: Create missing SCR issues from scr/REGISTRY.csv
         uses: actions/github-script@v7
@@ -27,30 +37,30 @@ jobs:
 
             const csvPath = 'scr/REGISTRY.csv';
             if (!fs.existsSync(csvPath)) { core.notice('No registry file'); return; }
-
-            const content = fs.readFileSync(csvPath, 'utf8').trim();
+            let content = fs.readFileSync(csvPath, 'utf8').replace(/\r\n/g, '\n').trim();
             if (!content) { core.notice('Empty registry'); return; }
 
-            const rows = content.split('\n').slice(1); // skip header
+            // rows: scr_id,title,path (title has commas removed by 02)
+            const rows = content.split('\n').slice(1);
 
-            // Fetch all SCR issues (open/closed)
-            const allIssues = await github.paginate(
+            // Get all SCR issues (open+closed)
+            const existing = await github.paginate(
               github.rest.issues.listForRepo,
               { owner, repo, state: 'all', labels: 'SCR', per_page: 100 }
             );
 
+            let created = 0, skipped = 0;
             for (const row of rows) {
               if (!row.trim()) continue;
-              const [rawScr, rawTitle, rawPath] = row.split(',');
-              const scr = (rawScr || '').trim();
-              const titleCsv = (rawTitle || '').trim();
-              const mdPath = (rawPath || '').trim();
-              if (!/^SCR\d{6}$/.test(scr)) continue;
+              const [scrRaw, titleCsvRaw, mdPathRaw] = row.split(',');
+              const scr = (scrRaw||'').trim();
+              const titleCsv = (titleCsvRaw||'').trim();
+              const mdPath = (mdPathRaw||'').trim();
+              if (!/^SCR\d{6}$/.test(scr)) { core.info(`Skip malformed row: ${row}`); continue; }
 
-              // Skip if already exists
-              if (allIssues.some(i => (i.title || '').includes(scr))) continue;
+              if (existing.some(i => (i.title||'').includes(scr))) { skipped++; continue; }
 
-              // Prefer H1 from MD if available; otherwise use CSV title
+              // Prefer H1 in MD; fallback to CSV title; commas already stripped in 02
               let title = titleCsv && titleCsv !== '(no title)' ? titleCsv : 'Change Request';
               try {
                 const md = fs.readFileSync(mdPath, 'utf8');
@@ -64,4 +74,6 @@ jobs:
                 body: `Auto-created from \`${mdPath}\` after **scr/REGISTRY.csv** update.`,
                 labels: ['SCR', 'state: open']
               });
+              created++;
             }
+            core.notice(`Created ${created} issue(s), skipped ${skipped}.`);
