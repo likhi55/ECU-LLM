@@ -1,0 +1,11 @@
+time,ignition_switch,acc_pedal_position,brake_pedal_position,current_gear,cruise_enable,cruise_target_speed
+0,1,0,0,3,1,2000
+1,1,0,0,3,1,2000
+2,1,0,0,3,1,2000
+3,1,0,0,3,1,2000
+4,1,0,0,3,1,2000
+5,1,0,0,3,1,2000
+6,1,0,0,3,1,2000
+7,1,0,0,3,1,2000
+8,1,0,0,3,1,2000
+9,1,0,0,3,1,2000

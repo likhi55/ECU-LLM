@@ -10,6 +10,14 @@ static int clamp_int(int v, int lo, int hi) {
     if (v > hi) return hi;
     return v;
 }
+static double clamp_double(double v, double lo, double hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+static int round_to_int(double x) {
+    return (int)(x + (x >= 0.0 ? 0.5 : -0.5));
+}
 
 // ---------- SCR1 ----------
 int compute_engine_state(int ignition_switch) {
@@ -97,20 +105,96 @@ int update_engine_speed(int engine_state,
     int gear  = clamp_int(current_gear, 1, 5);
     int prev  = (prev_speed_rpm < 0) ? 0 : prev_speed_rpm;
 
-    // Acceleration scaled by gear
     double gain_deg = ACC_BASE_GAIN_RPM_PER_DEG * gear_mult[gear];
     double delta_acc = (double)acc * gain_deg;
-
-    // Brake deceleration
     double delta_brk = (double)brake * (double)brake_gain_rpm_per_deg;
 
-    // Next speed (rounded to nearest int after clamping)
-    double next_d = (double)prev + delta_acc - delta_brk;
-    if (next_d < 0.0) next_d = 0.0;
-    if (next_d > (double)max_speed_rpm) next_d = (double)max_speed_rpm;
+    double next = (double)prev + delta_acc - delta_brk;
+    next = clamp_double(next, 0.0, (double)max_speed_rpm);
+    return round_to_int(next);
+}
 
-    int next_i = (int)(next_d + 0.5);  // round half up
-    if (next_i < 0) next_i = 0;
-    if (next_i > max_speed_rpm) next_i = max_speed_rpm;
-    return next_i;
+// ---------- SCR5 (Cruise Control) ----------
+int parse_cc_params(const char *calib_path,
+                    double *cc_kp,
+                    int *cc_max_step_per_iter,
+                    int *cc_activation_gear_min,
+                    int *cc_target_min,
+                    int *cc_target_max)
+{
+    // defaults
+    if (cc_kp)                    *cc_kp = 0.2;
+    if (cc_max_step_per_iter)     *cc_max_step_per_iter = 30;
+    if (cc_activation_gear_min)   *cc_activation_gear_min = 3;
+    if (cc_target_min)            *cc_target_min = 300;
+    if (cc_target_max)            *cc_target_max = 2000;
+
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        double dv; int iv;
+        if (cc_kp && sscanf(line, " cc_kp %*[^0-9.-]%lf", &dv) == 1) { *cc_kp = dv; parsed++; continue; }
+        if (cc_max_step_per_iter && sscanf(line, " cc_max_step_per_iter %*[^0-9-]%d", &iv) == 1) { *cc_max_step_per_iter = iv; parsed++; continue; }
+        if (cc_activation_gear_min && sscanf(line, " cc_activation_gear_min %*[^0-9-]%d", &iv) == 1) { *cc_activation_gear_min = iv; parsed++; continue; }
+        if (cc_target_min && sscanf(line, " cc_target_min %*[^0-9-]%d", &iv) == 1) { *cc_target_min = iv; parsed++; continue; }
+        if (cc_target_max && sscanf(line, " cc_target_max %*[^0-9-]%d", &iv) == 1) { *cc_target_max = iv; parsed++; continue; }
+    }
+    fclose(f);
+    return parsed;
+}
+
+int update_engine_speed_cc(int engine_state,
+                           int acc_deg,
+                           int brake_deg,
+                           int current_gear,
+                           int prev_speed_rpm,
+                           int max_speed_rpm,
+                           int brake_gain_rpm_per_deg,
+                           const double gear_mult[6],
+                           int cruise_enable,
+                           int cruise_target_speed,
+                           double cc_kp,
+                           int cc_max_step_per_iter,
+                           int cc_activation_gear_min,
+                           int cc_target_min,
+                           int cc_target_max)
+{
+    if (engine_state == 0) {
+        return 0; // ignition OFF
+    }
+
+    // sanitize
+    int acc   = clamp_int(acc_deg,   0, 45);
+    int brake = clamp_int(brake_deg, 0, 45);
+    int gear  = clamp_int(current_gear, 1, 5);
+    int prev  = (prev_speed_rpm < 0) ? 0 : prev_speed_rpm;
+
+    // ---- Baseline (SCR2–SCR4) ----
+    double gain_deg = ACC_BASE_GAIN_RPM_PER_DEG * gear_mult[gear];
+    double delta_acc = (double)acc * gain_deg;
+    double delta_brk = (double)brake * (double)brake_gain_rpm_per_deg;
+    double next = (double)prev + delta_acc - delta_brk;
+
+    // ---- Cruise Control (SCR5) ----
+    int cruise_ok = (cruise_enable == 1) &&
+                    (brake == 0) &&
+                    (acc == 0) &&
+                    (gear >= cc_activation_gear_min);
+
+    if (cruise_ok) {
+        int tgt_hi = (cc_target_max < max_speed_rpm) ? cc_target_max : max_speed_rpm;
+        int target = clamp_int(cruise_target_speed, cc_target_min, tgt_hi);
+        double error = (double)target - (double)prev; // use prev speed per spec
+        double delta_cc = cc_kp * error;
+        // clamp cruise step
+        if (delta_cc > (double)cc_max_step_per_iter)  delta_cc = (double)cc_max_step_per_iter;
+        if (delta_cc < (double)(-cc_max_step_per_iter)) delta_cc = (double)(-cc_max_step_per_iter);
+        next += delta_cc;
+    }
+
+    next = clamp_double(next, 0.0, (double)max_speed_rpm);
+    return round_to_int(next);
 }
