@@ -1,0 +1,7 @@
+# Lower limits so plateau is visible quickly under cruise
+rev_soft_limit = 300
+rev_hard_limit = 350
+rev_hysteresis = 20
+rev_hard_cut_step = 60
+rev_cut_cooldown_rows = 1
+# (Other calibrations default; cruise params default: +30/row)

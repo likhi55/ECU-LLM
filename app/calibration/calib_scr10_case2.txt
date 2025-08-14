@@ -1,0 +1,6 @@
+# Narrow rev limits to force hard cut
+rev_soft_limit = 170
+rev_hard_limit = 175
+rev_hysteresis = 10
+rev_hard_cut_step = 60
+rev_cut_cooldown_rows = 2

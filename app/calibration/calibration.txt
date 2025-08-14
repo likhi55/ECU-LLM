@@ -34,3 +34,10 @@ limp_rows_confirm = 2
 limp_max_speed = 300
 limp_acc_gain_scale = 0.3
 limp_clear_on_ignition_off = 1
+
+# SCR10 soft/hard rev limiter
+rev_soft_limit = 1800
+rev_hard_limit = 1950
+rev_hysteresis = 50
+rev_hard_cut_step = 60
+rev_cut_cooldown_rows = 2

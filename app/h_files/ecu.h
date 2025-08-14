@@ -101,7 +101,7 @@ int apply_slew_limit(int engine_state,
                      int slew_max_rise_per_iter,
                      int slew_max_fall_per_iter);
 
-// ---------- SCR9 (Pedal plausibility & limp mode) ----------
+// ---------- SCR9 ----------
 int parse_limp_params(const char *calib_path,
                       int *acc_overlap_deg,
                       int *brk_overlap_deg,
@@ -109,11 +109,6 @@ int parse_limp_params(const char *calib_path,
                       int *limp_max_speed,
                       double *limp_acc_gain_scale,
                       int *limp_clear_on_ignition_off);
-
-/**
- * Update limp-mode latch & counter based on current row.
- * - Mutates *limp_mode_io and *overlap_run_count_io.
- */
 void update_limp_state(int engine_state,
                        int acc_deg,
                        int brake_deg,
@@ -123,14 +118,33 @@ void update_limp_state(int engine_state,
                        int limp_clear_on_ignition_off,
                        int *limp_mode_io,
                        int *overlap_run_count_io);
-
-/**
- * Apply limp cap to provisional speed (minimal implementation).
- * Returns min(provisional, min(limp_max_speed, max_engine_speed)) if limp_mode==1, else provisional.
- */
 int apply_limp_cap(int provisional_speed_rpm,
                    int max_engine_speed,
                    int limp_mode,
                    int limp_max_speed);
+
+// ---------- SCR10 (Rev limiter) ----------
+int parse_rev_params(const char *calib_path,
+                     int *rev_soft_limit,
+                     int *rev_hard_limit,
+                     int *rev_hysteresis,
+                     int *rev_hard_cut_step,
+                     int *rev_cut_cooldown_rows);
+
+/**
+ * Soft/hard rev limiter with hysteresis; runs after SCR9 and before SCR8.
+ * Mutates *hard_cut_active_io and *hard_cut_cooldown_io.
+ */
+int apply_rev_limiter(int engine_state,
+                      int prev_output_speed_rpm,
+                      int provisional_speed_rpm,
+                      int max_engine_speed,
+                      int *hard_cut_active_io,
+                      int *hard_cut_cooldown_io,
+                      int rev_soft_limit,
+                      int rev_hard_limit,
+                      int rev_hysteresis,
+                      int rev_hard_cut_step,
+                      int rev_cut_cooldown_rows);
 
 #endif
