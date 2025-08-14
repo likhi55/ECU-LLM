@@ -13,5 +13,10 @@ cc_activation_gear_min = 3
 cc_target_min = 300
 cc_target_max = 2000
 
-# SCR6 coastdown
 drag_rpm_per_iter = 5
+
+# SCR7 idle control
+idle_target_speed = 600
+idle_kp = 0.2
+idle_max_step_per_iter = 15
+idle_activation_gear_max = 5
