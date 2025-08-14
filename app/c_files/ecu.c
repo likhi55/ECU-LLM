@@ -1,10 +1,12 @@
+// app/c_files/ecu.c
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include "ecu.h"
 
-#define ACC_BASE_GAIN_RPM_PER_DEG 2.0  // SCR2 base gain
+#define ACC_BASE_GAIN_RPM_PER_DEG 2.0  // SCR2 base accel gain
 
+// ------------------------ Utilities ------------------------
 static int clamp_int(int v, int lo, int hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
@@ -19,12 +21,12 @@ static int round_to_int(double x) {
     return (int)(x + (x >= 0.0 ? 0.5 : -0.5));
 }
 
-// ---------- SCR1 ----------
+// ======================== SCR1 ==============================
 int compute_engine_state(int ignition_switch) {
     return ignition_switch ? 1 : 0;
 }
 
-// ---------- SCR2 ----------
+// ======================== SCR2 ==============================
 int parse_max_engine_speed(const char *calib_path, int fallback_rpm) {
     FILE *f = fopen(calib_path, "r");
     if (!f) return fallback_rpm;
@@ -42,7 +44,7 @@ int parse_max_engine_speed(const char *calib_path, int fallback_rpm) {
     return maxrpm;
 }
 
-// ---------- SCR3 ----------
+// ======================== SCR3 ==============================
 int parse_brake_gain(const char *calib_path, int fallback_gain) {
     FILE *f = fopen(calib_path, "r");
     if (!f) return fallback_gain;
@@ -51,7 +53,7 @@ int parse_brake_gain(const char *calib_path, int fallback_gain) {
     int gain = fallback_gain;
     while (fgets(line, sizeof(line), f)) {
         int val = 0;
-        if (sscanf(line, " brake_gain_rpm_per_deg %*[^0-9]%d", &val) == 1 && val >= 0) {
+        if (sscanf(line, " brake_gain_rpm_per_deg %*[^0-9-]%d", &val) == 1 && val >= 0) {
             gain = val;
             break;
         }
@@ -60,7 +62,7 @@ int parse_brake_gain(const char *calib_path, int fallback_gain) {
     return gain;
 }
 
-// ---------- SCR4 ----------
+// ======================== SCR4 ==============================
 int parse_gear_multipliers(const char *calib_path, double gear_mult[6]) {
     // defaults
     gear_mult[0] = 0.0;   // unused
@@ -112,7 +114,7 @@ int update_engine_speed(int engine_state,
     return round_to_int(next);
 }
 
-// ---------- SCR5 ----------
+// ======================== SCR5 ==============================
 int parse_cc_params(const char *calib_path,
                     double *cc_kp,
                     int *cc_max_step_per_iter,
@@ -182,9 +184,9 @@ int update_engine_speed_cc(int engine_state,
     if (cruise_ok) {
         int tgt_hi = (cc_target_max < max_speed_rpm) ? cc_target_max : max_speed_rpm;
         int target = clamp_int(cruise_target_speed, cc_target_min, tgt_hi);
-        double error = (double)target - (double)prev; // based on prev
+        double error = (double)target - (double)prev; // use prev output as reference
         double delta_cc = cc_kp * error;
-        if (delta_cc > (double)cc_max_step_per_iter)   delta_cc = (double)cc_max_step_per_iter;
+        if (delta_cc > (double)cc_max_step_per_iter)    delta_cc = (double)cc_max_step_per_iter;
         if (delta_cc < (double)(-cc_max_step_per_iter)) delta_cc = (double)(-cc_max_step_per_iter);
         next += delta_cc;
     }
@@ -193,7 +195,7 @@ int update_engine_speed_cc(int engine_state,
     return round_to_int(next);
 }
 
-// ---------- SCR6 ----------
+// ======================== SCR6 ==============================
 int parse_drag_rpm_per_iter(const char *calib_path, int fallback_drag) {
     FILE *f = fopen(calib_path, "r");
     if (!f) return fallback_drag;
@@ -238,7 +240,7 @@ int update_engine_speed_cc_drag(int engine_state,
         cc_kp, cc_max_step_per_iter, cc_activation_gear_min, cc_target_min, cc_target_max
     );
 
-    // Apply coastdown only when: ON, no pedals, cruise disabled
+    // Coastdown when ON, no pedals, cruise disabled
     int acc   = clamp_int(acc_deg,   0, 45);
     int brake = clamp_int(brake_deg, 0, 45);
     if (acc == 0 && brake == 0 && cruise_enable == 0) {
@@ -251,7 +253,7 @@ int update_engine_speed_cc_drag(int engine_state,
     return speed_after_scr5;
 }
 
-// ---------- SCR7 ----------
+// ======================== SCR7 ==============================
 int parse_idle_params(const char *calib_path,
                       int *idle_target_speed,
                       double *idle_kp,
@@ -312,7 +314,7 @@ int update_engine_speed_cc_drag_idle(int engine_state,
         drag_rpm_per_iter
     );
 
-    // Idle control conditions (use prev speed for the error)
+    // Idle control (use prev speed for error)
     int acc   = clamp_int(acc_deg,   0, 45);
     int brake = clamp_int(brake_deg, 0, 45);
     int gear  = clamp_int(current_gear, 1, 5);
@@ -338,7 +340,7 @@ int update_engine_speed_cc_drag_idle(int engine_state,
     return next;
 }
 
-// ---------- SCR8 ----------
+// ======================== SCR8 ==============================
 int parse_slew_params(const char *calib_path,
                       int *slew_max_rise_per_iter,
                       int *slew_max_fall_per_iter)
@@ -395,7 +397,7 @@ int apply_slew_limit(int engine_state,
     return tmp;
 }
 
-// ---------- SCR9 ----------
+// ======================== SCR9 ==============================
 int parse_limp_params(const char *calib_path,
                       int *acc_overlap_deg,
                       int *brk_overlap_deg,
@@ -422,18 +424,77 @@ int parse_limp_params(const char *calib_path,
         if (brk_overlap_deg && sscanf(line, " brk_overlap_deg %*[^0-9-]%d", &iv) == 1) { *brk_overlap_deg = (iv<0?0:iv); parsed++; continue; }
         if (limp_rows_confirm && sscanf(line, " limp_rows_confirm %*[^0-9-]%d", &iv) == 1) { *limp_rows_confirm = (iv<1?1:iv); parsed++; continue; }
         if (limp_max_speed && sscanf(line, " limp_max_speed %*[^0-9-]%d", &iv) == 1) { *limp_max_speed = (iv<0?0:iv); parsed++; continue; }
-        if (limp_acc_gain_scale && sscanf(line, " limp_acc_gain_scale %*[^0-9.-]%lf", &dv) == 1) {
-            if (dv < 0.0) dv = 0.0; if (dv > 1.0) dv = 1.0; *limp_acc_gain_scale = dv; parsed++; continue;
+        if (limp_acc_gain_scale &&
+            sscanf(line, " limp_acc_gain_scale %*[^0-9.-]%lf", &dv) == 1) {
+            if (dv < 0.0) dv = 0.0;
+            if (dv > 1.0) dv = 1.0;
+            *limp_acc_gain_scale = dv;
+            parsed++;
+            continue;
         }
-        if (limp_clear_on_ignition_off && sscanf(line, " limp_clear_on_ignition_off %*[^0-9-]%d", &iv) == 1) {
-            *limp_clear_on_ignition_off = (iv ? 1 : 0); parsed++; continue;
+        if (limp_clear_on_ignition_off &&
+            sscanf(line, " limp_clear_on_ignition_off %*[^0-9-]%d", &iv) == 1) {
+            *limp_clear_on_ignition_off = (iv ? 1 : 0);
+            parsed++;
+            continue;
         }
     }
     fclose(f);
     return parsed;
 }
 
-// ---------- SCR10 ----------
+void update_limp_state(int engine_state,
+                       int acc_deg,
+                       int brake_deg,
+                       int acc_overlap_deg,
+                       int brk_overlap_deg,
+                       int limp_rows_confirm,
+                       int limp_clear_on_ignition_off,
+                       int *limp_mode_io,
+                       int *overlap_run_count_io)
+{
+    if (!limp_mode_io || !overlap_run_count_io) return;
+
+    // Clear on ignition OFF if configured
+    if (engine_state == 0) {
+        if (limp_clear_on_ignition_off) {
+            *limp_mode_io = 0;
+            *overlap_run_count_io = 0;
+        }
+        return;
+    }
+
+    int acc   = clamp_int(acc_deg,   0, 45);
+    int brake = clamp_int(brake_deg, 0, 45);
+    int overlap = (acc >= (acc_overlap_deg < 0 ? 0 : acc_overlap_deg)) &&
+                  (brake >= (brk_overlap_deg < 0 ? 0 : brk_overlap_deg));
+
+    if (overlap) (*overlap_run_count_io)++;
+    else         *overlap_run_count_io = 0;
+
+    int need = (limp_rows_confirm < 1 ? 1 : limp_rows_confirm);
+    if (*overlap_run_count_io >= need) *limp_mode_io = 1;  // latch
+}
+
+int apply_limp_cap(int provisional_speed_rpm,
+                   int max_engine_speed,
+                   int limp_mode,
+                   int limp_max_speed)
+{
+    int v = provisional_speed_rpm;
+    if (v < 0) v = 0;
+    if (!limp_mode) {
+        if (v > max_engine_speed) v = max_engine_speed;
+        return v;
+    }
+    int cap = limp_max_speed;
+    if (cap < 0) cap = 0;
+    if (cap > max_engine_speed) cap = max_engine_speed;
+    if (v > cap) v = cap;
+    return v;
+}
+
+// ======================== SCR10 =============================
 int parse_rev_params(const char *calib_path,
                      int *rev_soft_limit,
                      int *rev_hard_limit,
@@ -477,7 +538,7 @@ int apply_rev_limiter(int engine_state,
                       int rev_cut_cooldown_rows)
 {
     if (engine_state == 0) {
-        if (hard_cut_active_io)  *hard_cut_active_io = 0;
+        if (hard_cut_active_io)   *hard_cut_active_io = 0;
         if (hard_cut_cooldown_io) *hard_cut_cooldown_io = 0;
         return 0;
     }
@@ -503,7 +564,7 @@ int apply_rev_limiter(int engine_state,
     int hard_active = (hard_cut_active_io && *hard_cut_active_io) ? 1 : 0;
     int cooldown    = (hard_cut_cooldown_io ? *hard_cut_cooldown_io : 0);
 
-    // Hard limiter logic with hysteresis
+    // Hard limiter with hysteresis
     if (hard_active) {
         int pull = prev_out - rev_hard_cut_step;
         if (tmp > pull) tmp = pull;
