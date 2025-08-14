@@ -7,3 +7,4 @@ SCR000005,Implement cruise control (target speed hold),scr/SCR000005.md
 SCR000006,Implement coastdown (friction drag when no pedals cruise off),scr/SCR000006.md
 SCR000007,Implement idle speed control (minimum speed hold when no pedals cruise off),scr/SCR000007.md
 SCR000008,Implement slew‑rate limiting on engine_speed (rise/fall per iteration),scr/SCR000008.md
+SCR000009,Implement pedal plausibility & limp mode (latched safety cap),scr/SCR000009.md
