@@ -312,7 +312,7 @@ int update_engine_speed_cc_drag_idle(int engine_state,
         drag_rpm_per_iter
     );
 
-    // Idle control conditions (use prev speed for the error as specified)
+    // Idle control conditions (use prev speed for the error)
     int acc   = clamp_int(acc_deg,   0, 45);
     int brake = clamp_int(brake_deg, 0, 45);
     int gear  = clamp_int(current_gear, 1, 5);
@@ -327,10 +327,8 @@ int update_engine_speed_cc_drag_idle(int engine_state,
         return after_drag;
     }
 
-    // Proportional nudge toward idle target (bounded, non-negative)
     int error = idle_target_speed - (prev_speed_rpm < 0 ? 0 : prev_speed_rpm);
     double delta_idle_d = idle_kp * (double)error;
-    // Bound and one-sided (no negative push)
     if (delta_idle_d < 0.0) delta_idle_d = 0.0;
     if (delta_idle_d > (double)idle_max_step_per_iter) delta_idle_d = (double)idle_max_step_per_iter;
 
@@ -338,4 +336,62 @@ int update_engine_speed_cc_drag_idle(int engine_state,
     if (next < 0) next = 0;
     if (next > max_speed_rpm) next = max_speed_rpm;
     return next;
+}
+
+// ---------- SCR8 ----------
+int parse_slew_params(const char *calib_path,
+                      int *slew_max_rise_per_iter,
+                      int *slew_max_fall_per_iter)
+{
+    // defaults
+    if (slew_max_rise_per_iter) *slew_max_rise_per_iter = 50;
+    if (slew_max_fall_per_iter) *slew_max_fall_per_iter = 80;
+
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        int iv;
+        if (slew_max_rise_per_iter &&
+            sscanf(line, " slew_max_rise_per_iter %*[^0-9-]%d", &iv) == 1) {
+            *slew_max_rise_per_iter = (iv < 0) ? 0 : iv; parsed++; continue;
+        }
+        if (slew_max_fall_per_iter &&
+            sscanf(line, " slew_max_fall_per_iter %*[^0-9-]%d", &iv) == 1) {
+            *slew_max_fall_per_iter = (iv < 0) ? 0 : iv; parsed++; continue;
+        }
+    }
+    fclose(f);
+    return parsed;
+}
+
+int apply_slew_limit(int engine_state,
+                     int prev_output_speed_rpm,
+                     int provisional_speed_rpm,
+                     int max_speed_rpm,
+                     int slew_max_rise_per_iter,
+                     int slew_max_fall_per_iter)
+{
+    if (engine_state == 0) return 0;
+
+    if (slew_max_rise_per_iter < 0) slew_max_rise_per_iter = 0;
+    if (slew_max_fall_per_iter < 0) slew_max_fall_per_iter = 0;
+
+    int prev = prev_output_speed_rpm < 0 ? 0 : prev_output_speed_rpm;
+    int tmp  = provisional_speed_rpm;
+    if (tmp < 0) tmp = 0;
+    if (tmp > max_speed_rpm) tmp = max_speed_rpm;
+
+    long delta = (long)tmp - (long)prev;
+    if (delta > (long)slew_max_rise_per_iter) {
+        tmp = prev + slew_max_rise_per_iter;
+    } else if (delta < -(long)slew_max_fall_per_iter) {
+        tmp = prev - slew_max_fall_per_iter;
+    } // else keep tmp
+
+    if (tmp < 0) tmp = 0;
+    if (tmp > max_speed_rpm) tmp = max_speed_rpm;
+    return tmp;
 }

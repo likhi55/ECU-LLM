@@ -63,19 +63,12 @@ int update_engine_speed_cc_drag(int engine_state,
                                 int cc_target_max,
                                 int drag_rpm_per_iter);
 
-// ---------- SCR7 (Idle Control) ----------
+// ---------- SCR7 ----------
 int parse_idle_params(const char *calib_path,
                       int *idle_target_speed,
                       double *idle_kp,
                       int *idle_max_step_per_iter,
                       int *idle_activation_gear_max);
-
-/**
- * Update engine speed with accel + brake + cruise + coastdown + idle control.
- * Idle applies AFTER coastdown when:
- *   engine_state==1, acc==0, brake==0, cruise_enable==0,
- *   current_gear <= idle_activation_gear_max, and prev_speed < idle_target_speed.
- */
 int update_engine_speed_cc_drag_idle(int engine_state,
                                      int acc_deg,
                                      int brake_deg,
@@ -96,5 +89,21 @@ int update_engine_speed_cc_drag_idle(int engine_state,
                                      double idle_kp,
                                      int idle_max_step_per_iter,
                                      int idle_activation_gear_max);
+
+// ---------- SCR8 (Slew-rate limiting) ----------
+int parse_slew_params(const char *calib_path,
+                      int *slew_max_rise_per_iter,
+                      int *slew_max_fall_per_iter);
+
+/**
+ * Apply slew-rate limiting using the previous *emitted* speed.
+ * If engine_state==0 → returns 0.
+ */
+int apply_slew_limit(int engine_state,
+                     int prev_output_speed_rpm,
+                     int provisional_speed_rpm,
+                     int max_speed_rpm,
+                     int slew_max_rise_per_iter,
+                     int slew_max_fall_per_iter);
 
 #endif
