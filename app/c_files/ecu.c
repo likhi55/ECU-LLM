@@ -230,7 +230,7 @@ int update_engine_speed_cc_drag(int engine_state,
 {
     if (engine_state == 0) return 0;
 
-    // First, compute baseline + cruise (reuse SCR5 function)
+    // Baseline + cruise (SCR5)
     int speed_after_scr5 = update_engine_speed_cc(
         engine_state, acc_deg, brake_deg, current_gear, prev_speed_rpm,
         max_speed_rpm, brake_gain_rpm_per_deg, gear_mult,
@@ -249,4 +249,93 @@ int update_engine_speed_cc_drag(int engine_state,
     }
 
     return speed_after_scr5;
+}
+
+// ---------- SCR7 ----------
+int parse_idle_params(const char *calib_path,
+                      int *idle_target_speed,
+                      double *idle_kp,
+                      int *idle_max_step_per_iter,
+                      int *idle_activation_gear_max)
+{
+    // defaults
+    if (idle_target_speed)        *idle_target_speed = 600;
+    if (idle_kp)                  *idle_kp = 0.2;
+    if (idle_max_step_per_iter)   *idle_max_step_per_iter = 15;
+    if (idle_activation_gear_max) *idle_activation_gear_max = 5;
+
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        double dv; int iv;
+        if (idle_target_speed && sscanf(line, " idle_target_speed %*[^0-9-]%d", &iv) == 1) { *idle_target_speed = iv; parsed++; continue; }
+        if (idle_kp && sscanf(line, " idle_kp %*[^0-9.-]%lf", &dv) == 1) { *idle_kp = dv; parsed++; continue; }
+        if (idle_max_step_per_iter && sscanf(line, " idle_max_step_per_iter %*[^0-9-]%d", &iv) == 1) { *idle_max_step_per_iter = iv; parsed++; continue; }
+        if (idle_activation_gear_max && sscanf(line, " idle_activation_gear_max %*[^0-9-]%d", &iv) == 1) { *idle_activation_gear_max = iv; parsed++; continue; }
+    }
+    fclose(f);
+    return parsed;
+}
+
+int update_engine_speed_cc_drag_idle(int engine_state,
+                                     int acc_deg,
+                                     int brake_deg,
+                                     int current_gear,
+                                     int prev_speed_rpm,
+                                     int max_speed_rpm,
+                                     int brake_gain_rpm_per_deg,
+                                     const double gear_mult[6],
+                                     int cruise_enable,
+                                     int cruise_target_speed,
+                                     double cc_kp,
+                                     int cc_max_step_per_iter,
+                                     int cc_activation_gear_min,
+                                     int cc_target_min,
+                                     int cc_target_max,
+                                     int drag_rpm_per_iter,
+                                     int idle_target_speed,
+                                     double idle_kp,
+                                     int idle_max_step_per_iter,
+                                     int idle_activation_gear_max)
+{
+    if (engine_state == 0) return 0;
+
+    // First: baseline + cruise + coastdown (SCR2..SCR6)
+    int after_drag = update_engine_speed_cc_drag(
+        engine_state, acc_deg, brake_deg, current_gear, prev_speed_rpm,
+        max_speed_rpm, brake_gain_rpm_per_deg, gear_mult,
+        cruise_enable, cruise_target_speed,
+        cc_kp, cc_max_step_per_iter, cc_activation_gear_min, cc_target_min, cc_target_max,
+        drag_rpm_per_iter
+    );
+
+    // Idle control conditions (use prev speed for the error as specified)
+    int acc   = clamp_int(acc_deg,   0, 45);
+    int brake = clamp_int(brake_deg, 0, 45);
+    int gear  = clamp_int(current_gear, 1, 5);
+
+    int idle_ok = (engine_state == 1) &&
+                  (acc == 0) && (brake == 0) &&
+                  (cruise_enable == 0) &&
+                  (gear <= idle_activation_gear_max) &&
+                  (prev_speed_rpm < idle_target_speed);
+
+    if (!idle_ok) {
+        return after_drag;
+    }
+
+    // Proportional nudge toward idle target (bounded, non-negative)
+    int error = idle_target_speed - (prev_speed_rpm < 0 ? 0 : prev_speed_rpm);
+    double delta_idle_d = idle_kp * (double)error;
+    // Bound and one-sided (no negative push)
+    if (delta_idle_d < 0.0) delta_idle_d = 0.0;
+    if (delta_idle_d > (double)idle_max_step_per_iter) delta_idle_d = (double)idle_max_step_per_iter;
+
+    int next = after_drag + round_to_int(delta_idle_d);
+    if (next < 0) next = 0;
+    if (next > max_speed_rpm) next = max_speed_rpm;
+    return next;
 }

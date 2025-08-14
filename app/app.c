@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(out_path, "w");
     if (!fout) { perror("open output"); fclose(fin); return 4; }
 
-    // --- Calibrations (SCR2..SCR6) ---
+    // --- Calibrations (SCR2..SCR7) ---
     const char *calib_env  = getenv("ECU_CALIB_PATH");
     const char *calib_path = (calib_env && calib_env[0]) ? calib_env : "app/calibration/calibration.txt";
     int max_engine_speed = parse_max_engine_speed(calib_path, 2000);
@@ -53,6 +53,10 @@ int main(int argc, char *argv[]) {
     parse_cc_params(calib_path, &cc_kp, &cc_max_step, &cc_gear_min, &cc_tmin, &cc_tmax);
 
     int drag_rpm = parse_drag_rpm_per_iter(calib_path, 5);
+
+    int idle_target, idle_max_step, idle_gear_max;
+    double idle_kp;
+    parse_idle_params(calib_path, &idle_target, &idle_kp, &idle_max_step, &idle_gear_max);
 
     char line[MAX_LINE];
     char *cols[MAX_COLS];
@@ -111,14 +115,15 @@ int main(int argc, char *argv[]) {
         int cc_tgt = 0;
         if (cc_tgt_idx >= 0 && cc_tgt_idx < n && cols[cc_tgt_idx][0]) cc_tgt = (int)strtol(cols[cc_tgt_idx], NULL, 10);
 
-        engine_speed = update_engine_speed_cc_drag(
+        engine_speed = update_engine_speed_cc_drag_idle(
             engine_state,
             acc_deg, brk_deg, gear,
             engine_speed, max_engine_speed,
             brake_gain, gear_mult,
             cc_en, cc_tgt,
             cc_kp, cc_max_step, cc_gear_min, cc_tmin, cc_tmax,
-            drag_rpm
+            drag_rpm,
+            idle_target, idle_kp, idle_max_step, idle_gear_max
         );
 
         fprintf(fout, "%ld,%d,%d\n", t, engine_state, engine_speed);
