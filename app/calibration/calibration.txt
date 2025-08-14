@@ -26,3 +26,11 @@ idle_activation_gear_max = 5
 # SCR8 slew-rate limiting
 slew_max_rise_per_iter = 50
 slew_max_fall_per_iter = 80
+
+# SCR9 pedal plausibility & limp mode
+acc_overlap_deg = 10
+brk_overlap_deg = 10
+limp_rows_confirm = 2
+limp_max_speed = 300
+limp_acc_gain_scale = 0.3
+limp_clear_on_ignition_off = 1
