@@ -90,20 +90,47 @@ int update_engine_speed_cc_drag_idle(int engine_state,
                                      int idle_max_step_per_iter,
                                      int idle_activation_gear_max);
 
-// ---------- SCR8 (Slew-rate limiting) ----------
+// ---------- SCR8 ----------
 int parse_slew_params(const char *calib_path,
                       int *slew_max_rise_per_iter,
                       int *slew_max_fall_per_iter);
-
-/**
- * Apply slew-rate limiting using the previous *emitted* speed.
- * If engine_state==0 → returns 0.
- */
 int apply_slew_limit(int engine_state,
                      int prev_output_speed_rpm,
                      int provisional_speed_rpm,
                      int max_speed_rpm,
                      int slew_max_rise_per_iter,
                      int slew_max_fall_per_iter);
+
+// ---------- SCR9 (Pedal plausibility & limp mode) ----------
+int parse_limp_params(const char *calib_path,
+                      int *acc_overlap_deg,
+                      int *brk_overlap_deg,
+                      int *limp_rows_confirm,
+                      int *limp_max_speed,
+                      double *limp_acc_gain_scale,
+                      int *limp_clear_on_ignition_off);
+
+/**
+ * Update limp-mode latch & counter based on current row.
+ * - Mutates *limp_mode_io and *overlap_run_count_io.
+ */
+void update_limp_state(int engine_state,
+                       int acc_deg,
+                       int brake_deg,
+                       int acc_overlap_deg,
+                       int brk_overlap_deg,
+                       int limp_rows_confirm,
+                       int limp_clear_on_ignition_off,
+                       int *limp_mode_io,
+                       int *overlap_run_count_io);
+
+/**
+ * Apply limp cap to provisional speed (minimal implementation).
+ * Returns min(provisional, min(limp_max_speed, max_engine_speed)) if limp_mode==1, else provisional.
+ */
+int apply_limp_cap(int provisional_speed_rpm,
+                   int max_engine_speed,
+                   int limp_mode,
+                   int limp_max_speed);
 
 #endif

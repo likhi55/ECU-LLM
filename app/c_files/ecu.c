@@ -389,9 +389,97 @@ int apply_slew_limit(int engine_state,
         tmp = prev + slew_max_rise_per_iter;
     } else if (delta < -(long)slew_max_fall_per_iter) {
         tmp = prev - slew_max_fall_per_iter;
-    } // else keep tmp
-
+    }
     if (tmp < 0) tmp = 0;
     if (tmp > max_speed_rpm) tmp = max_speed_rpm;
     return tmp;
+}
+
+// ---------- SCR9 ----------
+int parse_limp_params(const char *calib_path,
+                      int *acc_overlap_deg,
+                      int *brk_overlap_deg,
+                      int *limp_rows_confirm,
+                      int *limp_max_speed,
+                      double *limp_acc_gain_scale,
+                      int *limp_clear_on_ignition_off)
+{
+    // defaults
+    if (acc_overlap_deg)            *acc_overlap_deg = 10;
+    if (brk_overlap_deg)            *brk_overlap_deg = 10;
+    if (limp_rows_confirm)          *limp_rows_confirm = 2;
+    if (limp_max_speed)             *limp_max_speed = 300;
+    if (limp_acc_gain_scale)        *limp_acc_gain_scale = 0.3;
+    if (limp_clear_on_ignition_off) *limp_clear_on_ignition_off = 1;
+
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0; char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        int iv; double dv;
+        if (acc_overlap_deg && sscanf(line, " acc_overlap_deg %*[^0-9-]%d", &iv) == 1) { *acc_overlap_deg = (iv<0?0:iv); parsed++; continue; }
+        if (brk_overlap_deg && sscanf(line, " brk_overlap_deg %*[^0-9-]%d", &iv) == 1) { *brk_overlap_deg = (iv<0?0:iv); parsed++; continue; }
+        if (limp_rows_confirm && sscanf(line, " limp_rows_confirm %*[^0-9-]%d", &iv) == 1) { *limp_rows_confirm = (iv<1?1:iv); parsed++; continue; }
+        if (limp_max_speed && sscanf(line, " limp_max_speed %*[^0-9-]%d", &iv) == 1) { *limp_max_speed = (iv<0?0:iv); parsed++; continue; }
+        if (limp_acc_gain_scale && sscanf(line, " limp_acc_gain_scale %*[^0-9.-]%lf", &dv) == 1) {
+            if (dv < 0.0) dv = 0.0; if (dv > 1.0) dv = 1.0; *limp_acc_gain_scale = dv; parsed++; continue;
+        }
+        if (limp_clear_on_ignition_off && sscanf(line, " limp_clear_on_ignition_off %*[^0-9-]%d", &iv) == 1) {
+            *limp_clear_on_ignition_off = (iv ? 1 : 0); parsed++; continue;
+        }
+    }
+    fclose(f);
+    return parsed;
+}
+
+void update_limp_state(int engine_state,
+                       int acc_deg,
+                       int brake_deg,
+                       int acc_overlap_deg,
+                       int brk_overlap_deg,
+                       int limp_rows_confirm,
+                       int limp_clear_on_ignition_off,
+                       int *limp_mode_io,
+                       int *overlap_run_count_io)
+{
+    if (!limp_mode_io || !overlap_run_count_io) return;
+
+    // Clear on ignition OFF if configured
+    if (engine_state == 0) {
+        if (limp_clear_on_ignition_off) {
+            *limp_mode_io = 0;
+            *overlap_run_count_io = 0;
+        }
+        return;
+    }
+
+    int acc   = clamp_int(acc_deg,   0, 45);
+    int brake = clamp_int(brake_deg, 0, 45);
+
+    int overlap = (acc >= acc_overlap_deg) && (brake >= brk_overlap_deg);
+
+    if (overlap) {
+        (*overlap_run_count_io)++;
+    } else {
+        *overlap_run_count_io = 0;
+    }
+
+    if (*overlap_run_count_io >= (limp_rows_confirm < 1 ? 1 : limp_rows_confirm)) {
+        *limp_mode_io = 1; // latch
+    }
+}
+
+int apply_limp_cap(int provisional_speed_rpm,
+                   int max_engine_speed,
+                   int limp_mode,
+                   int limp_max_speed)
+{
+    if (!limp_mode) return provisional_speed_rpm;
+    int cap = limp_max_speed;
+    if (cap > max_engine_speed) cap = max_engine_speed;
+    if (cap < 0) cap = 0;
+    if (provisional_speed_rpm > cap) return cap;
+    if (provisional_speed_rpm < 0) return 0;
+    return provisional_speed_rpm;
 }
