@@ -1,0 +1,6 @@
+rev_soft_limit = 170
+rev_hard_limit = 175
+rev_hysteresis = 10
+rev_hard_cut_step = 0
+rev_cut_cooldown_rows = 0
+idle_activation_gear_max = 0   # disable idle control

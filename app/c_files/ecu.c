@@ -433,53 +433,102 @@ int parse_limp_params(const char *calib_path,
     return parsed;
 }
 
-void update_limp_state(int engine_state,
-                       int acc_deg,
-                       int brake_deg,
-                       int acc_overlap_deg,
-                       int brk_overlap_deg,
-                       int limp_rows_confirm,
-                       int limp_clear_on_ignition_off,
-                       int *limp_mode_io,
-                       int *overlap_run_count_io)
+// ---------- SCR10 ----------
+int parse_rev_params(const char *calib_path,
+                     int *rev_soft_limit,
+                     int *rev_hard_limit,
+                     int *rev_hysteresis,
+                     int *rev_hard_cut_step,
+                     int *rev_cut_cooldown_rows)
 {
-    if (!limp_mode_io || !overlap_run_count_io) return;
+    // defaults
+    if (rev_soft_limit)         *rev_soft_limit = 1800;
+    if (rev_hard_limit)         *rev_hard_limit = 1950;
+    if (rev_hysteresis)         *rev_hysteresis = 50;
+    if (rev_hard_cut_step)      *rev_hard_cut_step = 60;
+    if (rev_cut_cooldown_rows)  *rev_cut_cooldown_rows = 2;
 
-    // Clear on ignition OFF if configured
-    if (engine_state == 0) {
-        if (limp_clear_on_ignition_off) {
-            *limp_mode_io = 0;
-            *overlap_run_count_io = 0;
-        }
-        return;
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0; char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        int iv;
+        if (rev_soft_limit && sscanf(line, " rev_soft_limit %*[^0-9-]%d", &iv) == 1) { *rev_soft_limit = (iv<0?0:iv); parsed++; continue; }
+        if (rev_hard_limit && sscanf(line, " rev_hard_limit %*[^0-9-]%d", &iv) == 1) { *rev_hard_limit = (iv<0?0:iv); parsed++; continue; }
+        if (rev_hysteresis && sscanf(line, " rev_hysteresis %*[^0-9-]%d", &iv) == 1) { *rev_hysteresis = (iv<0?0:iv); parsed++; continue; }
+        if (rev_hard_cut_step && sscanf(line, " rev_hard_cut_step %*[^0-9-]%d", &iv) == 1) { *rev_hard_cut_step = (iv<0?0:iv); parsed++; continue; }
+        if (rev_cut_cooldown_rows && sscanf(line, " rev_cut_cooldown_rows %*[^0-9-]%d", &iv) == 1) { *rev_cut_cooldown_rows = (iv<0?0:iv); parsed++; continue; }
     }
-
-    int acc   = clamp_int(acc_deg,   0, 45);
-    int brake = clamp_int(brake_deg, 0, 45);
-
-    int overlap = (acc >= acc_overlap_deg) && (brake >= brk_overlap_deg);
-
-    if (overlap) {
-        (*overlap_run_count_io)++;
-    } else {
-        *overlap_run_count_io = 0;
-    }
-
-    if (*overlap_run_count_io >= (limp_rows_confirm < 1 ? 1 : limp_rows_confirm)) {
-        *limp_mode_io = 1; // latch
-    }
+    fclose(f);
+    return parsed;
 }
 
-int apply_limp_cap(int provisional_speed_rpm,
-                   int max_engine_speed,
-                   int limp_mode,
-                   int limp_max_speed)
+int apply_rev_limiter(int engine_state,
+                      int prev_output_speed_rpm,
+                      int provisional_speed_rpm,
+                      int max_engine_speed,
+                      int *hard_cut_active_io,
+                      int *hard_cut_cooldown_io,
+                      int rev_soft_limit,
+                      int rev_hard_limit,
+                      int rev_hysteresis,
+                      int rev_hard_cut_step,
+                      int rev_cut_cooldown_rows)
 {
-    if (!limp_mode) return provisional_speed_rpm;
-    int cap = limp_max_speed;
-    if (cap > max_engine_speed) cap = max_engine_speed;
-    if (cap < 0) cap = 0;
-    if (provisional_speed_rpm > cap) return cap;
-    if (provisional_speed_rpm < 0) return 0;
-    return provisional_speed_rpm;
+    if (engine_state == 0) {
+        if (hard_cut_active_io)  *hard_cut_active_io = 0;
+        if (hard_cut_cooldown_io) *hard_cut_cooldown_io = 0;
+        return 0;
+    }
+
+    // Sanitize calibrations and bound to max
+    if (rev_soft_limit < 0) rev_soft_limit = 0;
+    if (rev_hard_limit < 0) rev_hard_limit = 0;
+    if (rev_hysteresis < 0) rev_hysteresis = 0;
+    if (rev_hard_cut_step < 0) rev_hard_cut_step = 0;
+    if (rev_cut_cooldown_rows < 0) rev_cut_cooldown_rows = 0;
+
+    if (rev_soft_limit > max_engine_speed) rev_soft_limit = max_engine_speed;
+    if (rev_hard_limit > max_engine_speed) rev_hard_limit = max_engine_speed;
+    if (rev_soft_limit >= rev_hard_limit) {
+        rev_soft_limit = (rev_hard_limit > 0) ? (rev_hard_limit - 1) : 0;
+    }
+
+    int prev_out = prev_output_speed_rpm < 0 ? 0 : prev_output_speed_rpm;
+    int tmp = provisional_speed_rpm;
+    if (tmp < 0) tmp = 0;
+    if (tmp > max_engine_speed) tmp = max_engine_speed;
+
+    int hard_active = (hard_cut_active_io && *hard_cut_active_io) ? 1 : 0;
+    int cooldown    = (hard_cut_cooldown_io ? *hard_cut_cooldown_io : 0);
+
+    // Hard limiter logic with hysteresis
+    if (hard_active) {
+        int pull = prev_out - rev_hard_cut_step;
+        if (tmp > pull) tmp = pull;
+        if (cooldown > 0) cooldown--;
+        if (prev_out <= (rev_hard_limit - rev_hysteresis) && cooldown == 0) {
+            hard_active = 0; // release
+        }
+    } else {
+        if (tmp > rev_hard_limit || prev_out > rev_hard_limit) {
+            hard_active = 1;
+            cooldown = rev_cut_cooldown_rows;
+            if (tmp > rev_hard_limit) tmp = rev_hard_limit;
+        }
+    }
+
+    // Soft ceiling
+    if (tmp > rev_soft_limit) tmp = rev_soft_limit;
+
+    // Clamp to [0, max]
+    if (tmp < 0) tmp = 0;
+    if (tmp > max_engine_speed) tmp = max_engine_speed;
+
+    // Write back state
+    if (hard_cut_active_io)   *hard_cut_active_io = hard_active;
+    if (hard_cut_cooldown_io) *hard_cut_cooldown_io = cooldown;
+
+    return tmp;
 }

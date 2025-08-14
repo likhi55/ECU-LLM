@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(out_path, "w");
     if (!fout) { perror("open output"); fclose(fin); return 4; }
 
-    // --- Calibrations (SCR2..SCR9) ---
+    // --- Calibrations (SCR2..SCR10) ---
     const char *calib_env  = getenv("ECU_CALIB_PATH");
     const char *calib_path = (calib_env && calib_env[0]) ? calib_env : "app/calibration/calibration.txt";
     int max_engine_speed = parse_max_engine_speed(calib_path, 2000);
@@ -58,12 +58,15 @@ int main(int argc, char *argv[]) {
 
     int slew_rise, slew_fall; parse_slew_params(calib_path, &slew_rise, &slew_fall);
 
-    // SCR9 parameters
     int acc_overlap_deg, brk_overlap_deg, limp_rows_confirm, limp_max_speed, limp_clear_on_off;
     double limp_acc_gain_scale;
     parse_limp_params(calib_path,
                       &acc_overlap_deg, &brk_overlap_deg, &limp_rows_confirm,
                       &limp_max_speed, &limp_acc_gain_scale, &limp_clear_on_off);
+
+    int rev_soft, rev_hard, rev_hyst, rev_cut_step, rev_cooldown_rows;
+    parse_rev_params(calib_path,
+                     &rev_soft, &rev_hard, &rev_hyst, &rev_cut_step, &rev_cooldown_rows);
 
     char line[MAX_LINE];
     char *cols[MAX_COLS];
@@ -95,9 +98,13 @@ int main(int argc, char *argv[]) {
     long tgen = 0;
     int engine_speed = 0; // last *emitted* speed
 
-    // SCR9 persistent state
+    // SCR9: persistent limp state
     int limp_mode = 0;
     int overlap_run_count = 0;
+
+    // SCR10: rev limiter state
+    int hard_cut_active = 0;
+    int hard_cut_cooldown = 0;
 
     // --- Rows ---
     while (fgets(line, sizeof(line), fin)) {
@@ -126,17 +133,17 @@ int main(int argc, char *argv[]) {
         int cc_tgt = 0;
         if (cc_tgt_idx >= 0 && cc_tgt_idx < n && cols[cc_tgt_idx][0]) cc_tgt = (int)strtol(cols[cc_tgt_idx], NULL, 10);
 
-        // 1) Update limp latch/counter (SCR9)
+        // SCR9: update limp state
         update_limp_state(
             engine_state, acc_deg, brk_deg,
             acc_overlap_deg, brk_overlap_deg, limp_rows_confirm, limp_clear_on_off,
             &limp_mode, &overlap_run_count
         );
 
-        // Keep previously *emitted* speed for slew limiting
+        // Keep previously *emitted* speed for slew limiting and rev-limiter reference
         int prev_out = engine_speed;
 
-        // 2) Provisional via SCR2..SCR7
+        // SCR2..SCR7 provisional
         int provisional = update_engine_speed_cc_drag_idle(
             engine_state,
             acc_deg, brk_deg, gear,
@@ -148,10 +155,17 @@ int main(int argc, char *argv[]) {
             idle_target, idle_kp, idle_max_step, idle_gear_max
         );
 
-        // 3) Apply SCR9 limp cap BEFORE SCR8 (minimal implementation)
+        // SCR9: limp cap (minimal)
         provisional = apply_limp_cap(provisional, max_engine_speed, limp_mode, limp_max_speed);
 
-        // 4) Apply SCR8 slew-rate limiting vs prev_out
+        // SCR10: rev limiter (after SCR9, before SCR8)
+        provisional = apply_rev_limiter(
+            engine_state, prev_out, provisional, max_engine_speed,
+            &hard_cut_active, &hard_cut_cooldown,
+            rev_soft, rev_hard, rev_hyst, rev_cut_step, rev_cooldown_rows
+        );
+
+        // SCR8: slew-rate limiting vs prev_out
         engine_speed = apply_slew_limit(
             engine_state, prev_out, provisional, max_engine_speed, slew_rise, slew_fall
         );
