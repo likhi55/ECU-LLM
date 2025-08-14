@@ -41,22 +41,23 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(out_path, "w");
     if (!fout) { perror("open output"); fclose(fin); return 4; }
 
-    // --- Calibrations (SCR2..SCR7) ---
+    // --- Calibrations (SCR2..SCR8) ---
     const char *calib_env  = getenv("ECU_CALIB_PATH");
     const char *calib_path = (calib_env && calib_env[0]) ? calib_env : "app/calibration/calibration.txt";
     int max_engine_speed = parse_max_engine_speed(calib_path, 2000);
     int brake_gain       = parse_brake_gain(calib_path, 4);
-    double gear_mult[6];
-    parse_gear_multipliers(calib_path, gear_mult);
+    double gear_mult[6]; parse_gear_multipliers(calib_path, gear_mult);
 
     double cc_kp; int cc_max_step, cc_gear_min, cc_tmin, cc_tmax;
     parse_cc_params(calib_path, &cc_kp, &cc_max_step, &cc_gear_min, &cc_tmin, &cc_tmax);
 
     int drag_rpm = parse_drag_rpm_per_iter(calib_path, 5);
 
-    int idle_target, idle_max_step, idle_gear_max;
-    double idle_kp;
+    int idle_target, idle_max_step, idle_gear_max; double idle_kp;
     parse_idle_params(calib_path, &idle_target, &idle_kp, &idle_max_step, &idle_gear_max);
+
+    int slew_rise, slew_fall;
+    parse_slew_params(calib_path, &slew_rise, &slew_fall); // SCR8
 
     char line[MAX_LINE];
     char *cols[MAX_COLS];
@@ -86,7 +87,7 @@ int main(int argc, char *argv[]) {
     fprintf(fout, "time,engine_state,engine_speed\n");
 
     long tgen = 0;
-    int engine_speed = 0;
+    int engine_speed = 0; // last *emitted* speed
 
     // --- Rows ---
     while (fgets(line, sizeof(line), fin)) {
@@ -115,15 +116,24 @@ int main(int argc, char *argv[]) {
         int cc_tgt = 0;
         if (cc_tgt_idx >= 0 && cc_tgt_idx < n && cols[cc_tgt_idx][0]) cc_tgt = (int)strtol(cols[cc_tgt_idx], NULL, 10);
 
-        engine_speed = update_engine_speed_cc_drag_idle(
+        // Keep the previously *emitted* speed for slew limiting
+        int prev_out = engine_speed;
+
+        // Provisional speed after SCR2..SCR7
+        int provisional = update_engine_speed_cc_drag_idle(
             engine_state,
             acc_deg, brk_deg, gear,
-            engine_speed, max_engine_speed,
+            prev_out, max_engine_speed,
             brake_gain, gear_mult,
             cc_en, cc_tgt,
             cc_kp, cc_max_step, cc_gear_min, cc_tmin, cc_tmax,
             drag_rpm,
             idle_target, idle_kp, idle_max_step, idle_gear_max
+        );
+
+        // Apply SCR8 slew-rate limiting vs prev_out
+        engine_speed = apply_slew_limit(
+            engine_state, prev_out, provisional, max_engine_speed, slew_rise, slew_fall
         );
 
         fprintf(fout, "%ld,%d,%d\n", t, engine_state, engine_speed);
