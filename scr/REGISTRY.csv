@@ -9,3 +9,4 @@ SCR000007,Implement idle speed control (minimum speed hold when no pedals cruise
 SCR000008,Implement slew‑rate limiting on engine_speed (rise/fall per iteration),scr/SCR000008.md
 SCR000009,Implement pedal plausibility & limp mode (latched safety cap),scr/SCR000009.md
 SCR000010,Implement soft/hard rev limiter with hysteresis (overspeed protection),scr/SCR000010.md
+SCR000011,Brake–Throttle Override (BTO) — non‑latching accel cut/scale,scr/SCR000011.md
