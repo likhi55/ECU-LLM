@@ -184,7 +184,7 @@ int update_engine_speed_cc(int engine_state,
     if (cruise_ok) {
         int tgt_hi = (cc_target_max < max_speed_rpm) ? cc_target_max : max_speed_rpm;
         int target = clamp_int(cruise_target_speed, cc_target_min, tgt_hi);
-        double error = (double)target - (double)prev; // use prev output as reference
+        double error = (double)target - (double)prev; // based on prev
         double delta_cc = cc_kp * error;
         if (delta_cc > (double)cc_max_step_per_iter)    delta_cc = (double)cc_max_step_per_iter;
         if (delta_cc < (double)(-cc_max_step_per_iter)) delta_cc = (double)(-cc_max_step_per_iter);
@@ -240,7 +240,7 @@ int update_engine_speed_cc_drag(int engine_state,
         cc_kp, cc_max_step_per_iter, cc_activation_gear_min, cc_target_min, cc_target_max
     );
 
-    // Coastdown when ON, no pedals, cruise disabled
+    // Apply coastdown only when: ON, no pedals, cruise disabled
     int acc   = clamp_int(acc_deg,   0, 45);
     int brake = clamp_int(brake_deg, 0, 45);
     if (acc == 0 && brake == 0 && cruise_enable == 0) {
@@ -314,7 +314,7 @@ int update_engine_speed_cc_drag_idle(int engine_state,
         drag_rpm_per_iter
     );
 
-    // Idle control (use prev speed for error)
+    // Idle control conditions (use prev speed for the error)
     int acc   = clamp_int(acc_deg,   0, 45);
     int brake = clamp_int(brake_deg, 0, 45);
     int gear  = clamp_int(current_gear, 1, 5);
@@ -592,4 +592,69 @@ int apply_rev_limiter(int engine_state,
     if (hard_cut_cooldown_io) *hard_cut_cooldown_io = cooldown;
 
     return tmp;
+}
+
+// ======================== SCR11 (BTO) =======================
+int parse_bto_params(const char *calib_path,
+                     int *bto_brake_deg,
+                     int *bto_acc_min_deg,
+                     double *bto_acc_scale)
+{
+    if (bto_brake_deg)   *bto_brake_deg   = 10;
+    if (bto_acc_min_deg) *bto_acc_min_deg = 5;
+    if (bto_acc_scale)   *bto_acc_scale   = 0.0; // full cut by default
+
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0; char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        int iv; double dv;
+        if (bto_brake_deg && sscanf(line, " bto_brake_deg %*[^0-9-]%d", &iv) == 1) {
+            *bto_brake_deg = (iv < 0 ? 0 : iv); parsed++; continue;
+        }
+        if (bto_acc_min_deg && sscanf(line, " bto_acc_min_deg %*[^0-9-]%d", &iv) == 1) {
+            *bto_acc_min_deg = (iv < 0 ? 0 : iv); parsed++; continue;
+        }
+if (bto_acc_scale && sscanf(line, " bto_acc_scale %*[^0-9.-]%lf", &dv) == 1) {
+    if (dv < 0.0) {
+        dv = 0.0;
+    } else if (dv > 1.0) {
+        dv = 1.0;
+    }
+    *bto_acc_scale = dv;
+    parsed++;
+    continue;
+}
+
+    }
+    fclose(f);
+    return parsed;
+}
+
+int apply_bto_effective_acc(int acc_deg,
+                            int brake_deg,
+                            int bto_brake_deg,
+                            int bto_acc_min_deg,
+                            double bto_acc_scale)
+{
+    int acc   = clamp_int(acc_deg,   0, 45);
+    int brake = clamp_int(brake_deg, 0, 45);
+    if (bto_brake_deg   < 0) bto_brake_deg   = 0;
+    if (bto_acc_min_deg < 0) bto_acc_min_deg = 0;
+    if (bto_acc_scale   < 0.0) bto_acc_scale = 0.0;
+    if (bto_acc_scale   > 1.0) bto_acc_scale = 1.0;
+
+    if (brake >= bto_brake_deg && acc >= bto_acc_min_deg) {
+        double eff = (double)acc * bto_acc_scale;
+        int e = round_to_int(eff);
+        // clamp to [0,45]
+if (e < 0) {
+    e = 0;
+} else if (e > 45) {
+    e = 45;
+}
+return e;
+    }
+    return acc;
 }

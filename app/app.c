@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(out_path, "w");
     if (!fout) { perror("open output"); fclose(fin); return 4; }
 
-    // --- Calibrations (SCR2..SCR10) ---
+    // --- Calibrations (SCR2..SCR11) ---
     const char *calib_env  = getenv("ECU_CALIB_PATH");
     const char *calib_path = (calib_env && calib_env[0]) ? calib_env : "app/calibration/calibration.txt";
     int max_engine_speed = parse_max_engine_speed(calib_path, 2000);
@@ -67,6 +67,9 @@ int main(int argc, char *argv[]) {
     int rev_soft, rev_hard, rev_hyst, rev_cut_step, rev_cooldown_rows;
     parse_rev_params(calib_path,
                      &rev_soft, &rev_hard, &rev_hyst, &rev_cut_step, &rev_cooldown_rows);
+
+    int bto_brake_deg, bto_acc_min_deg; double bto_acc_scale;
+    parse_bto_params(calib_path, &bto_brake_deg, &bto_acc_min_deg, &bto_acc_scale);
 
     char line[MAX_LINE];
     char *cols[MAX_COLS];
@@ -133,7 +136,7 @@ int main(int argc, char *argv[]) {
         int cc_tgt = 0;
         if (cc_tgt_idx >= 0 && cc_tgt_idx < n && cols[cc_tgt_idx][0]) cc_tgt = (int)strtol(cols[cc_tgt_idx], NULL, 10);
 
-        // SCR9: update limp state
+        // SCR9: update limp state using raw pedals (plausibility)
         update_limp_state(
             engine_state, acc_deg, brk_deg,
             acc_overlap_deg, brk_overlap_deg, limp_rows_confirm, limp_clear_on_off,
@@ -143,10 +146,16 @@ int main(int argc, char *argv[]) {
         // Keep previously *emitted* speed for slew limiting and rev-limiter reference
         int prev_out = engine_speed;
 
-        // SCR2..SCR7 provisional
+        // SCR11: compute effective accelerator for baseline (non-latching BTO)
+        int eff_acc_deg = apply_bto_effective_acc(
+            acc_deg, brk_deg,
+            bto_brake_deg, bto_acc_min_deg, bto_acc_scale
+        );
+
+        // SCR2..SCR7 provisional (use eff_acc_deg)
         int provisional = update_engine_speed_cc_drag_idle(
             engine_state,
-            acc_deg, brk_deg, gear,
+            eff_acc_deg, brk_deg, gear,
             prev_out, max_engine_speed,
             brake_gain, gear_mult,
             cc_en, cc_tgt,
