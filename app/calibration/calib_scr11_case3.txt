@@ -1,0 +1,4 @@
+bto_brake_deg = 5
+bto_acc_min_deg = 5
+bto_acc_scale = 0.2
+brake_gain_rpm_per_deg = 0

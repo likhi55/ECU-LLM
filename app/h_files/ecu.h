@@ -123,18 +123,13 @@ int apply_limp_cap(int provisional_speed_rpm,
                    int limp_mode,
                    int limp_max_speed);
 
-// ---------- SCR10 (Rev limiter) ----------
+// ---------- SCR10 ----------
 int parse_rev_params(const char *calib_path,
                      int *rev_soft_limit,
                      int *rev_hard_limit,
                      int *rev_hysteresis,
                      int *rev_hard_cut_step,
                      int *rev_cut_cooldown_rows);
-
-/**
- * Soft/hard rev limiter with hysteresis; runs after SCR9 and before SCR8.
- * Mutates *hard_cut_active_io and *hard_cut_cooldown_io.
- */
 int apply_rev_limiter(int engine_state,
                       int prev_output_speed_rpm,
                       int provisional_speed_rpm,
@@ -146,5 +141,17 @@ int apply_rev_limiter(int engine_state,
                       int rev_hysteresis,
                       int rev_hard_cut_step,
                       int rev_cut_cooldown_rows);
+
+// ---------- SCR11 (BTO) ----------
+int parse_bto_params(const char *calib_path,
+                     int *bto_brake_deg,
+                     int *bto_acc_min_deg,
+                     double *bto_acc_scale);
+/** Returns the effective accelerator angle after BTO scaling/cut. */
+int apply_bto_effective_acc(int acc_deg,
+                            int brake_deg,
+                            int bto_brake_deg,
+                            int bto_acc_min_deg,
+                            double bto_acc_scale);
 
 #endif

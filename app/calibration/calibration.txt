@@ -1,33 +1,37 @@
-# Existing keys…
+# --- Global limits (SCR2) ---
 max_engine_speed = 2000
-brake_gain_rpm_per_deg = 4
-gear_acc_multiplier_g1 = 0.6
-gear_acc_multiplier_g2 = 0.85
-gear_acc_multiplier_g3 = 1.0
-gear_acc_multiplier_g4 = 1.1
-gear_acc_multiplier_g5 = 1.2
 
+# --- Brake decel (SCR3) ---
+brake_gain_rpm_per_deg = 4
+
+# --- Gear multipliers (SCR4) ---
+gear_acc_multiplier_g1 = 0.60
+gear_acc_multiplier_g2 = 0.85
+gear_acc_multiplier_g3 = 1.00
+gear_acc_multiplier_g4 = 1.10
+gear_acc_multiplier_g5 = 1.20
+
+# --- Cruise control (SCR5) ---
 cc_kp = 0.2
 cc_max_step_per_iter = 30
 cc_activation_gear_min = 3
 cc_target_min = 300
 cc_target_max = 2000
 
+# --- Coastdown (SCR6) ---
 drag_rpm_per_iter = 5
 
-# SCR7 idle control
+# --- Idle (SCR7) ---
 idle_target_speed = 600
 idle_kp = 0.2
 idle_max_step_per_iter = 15
 idle_activation_gear_max = 5
 
-# …existing keys…
-
-# SCR8 slew-rate limiting
+# --- Slew limits (SCR8) ---
 slew_max_rise_per_iter = 50
 slew_max_fall_per_iter = 80
 
-# SCR9 pedal plausibility & limp mode
+# --- Limp (SCR9) ---
 acc_overlap_deg = 10
 brk_overlap_deg = 10
 limp_rows_confirm = 2
@@ -35,9 +39,14 @@ limp_max_speed = 300
 limp_acc_gain_scale = 0.3
 limp_clear_on_ignition_off = 1
 
-# SCR10 soft/hard rev limiter
+# --- Rev limiter (SCR10) ---
 rev_soft_limit = 1800
 rev_hard_limit = 1950
 rev_hysteresis = 50
 rev_hard_cut_step = 60
 rev_cut_cooldown_rows = 2
+
+# --- Brake–Throttle Override (SCR11) ---
+bto_brake_deg = 10
+bto_acc_min_deg = 5
+bto_acc_scale = 0.0
