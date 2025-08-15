@@ -10,3 +10,4 @@ SCR000008,Implement slew‑rate limiting on engine_speed (rise/fall per iteratio
 SCR000009,Implement pedal plausibility & limp mode (latched safety cap),scr/SCR000009.md
 SCR000010,Implement soft/hard rev limiter with hysteresis (overspeed protection),scr/SCR000010.md
 SCR000011,Brake–Throttle Override (BTO) — non‑latching accel cut/scale,scr/SCR000011.md
+SCR000012,SCR000012 — BTO Release Ramp (soft restore of accelerator),scr/SCR000012.md
