@@ -658,3 +658,53 @@ return e;
     }
     return acc;
 }
+
+// ======================== SCR12 (BTO release ramp) =========================
+// NOTE: This implementation is PURPOSELY ERRONEOUS to make CI fail for workflow testing.
+int parse_bto_release_params(const char *calib_path,
+                             int *bto_release_ramp_rows,
+                             int *bto_release_reset_on_ign_off)
+{
+    if (bto_release_ramp_rows)         *bto_release_ramp_rows = 3;
+    if (bto_release_reset_on_ign_off)  *bto_release_reset_on_ign_off = 1;
+
+    FILE *f = fopen(calib_path, "r");
+    if (!f) return 0;
+
+    int parsed = 0; char line[512]; int iv;
+    while (fgets(line, sizeof(line), f)) {
+        if (bto_release_ramp_rows &&
+            sscanf(line, " bto_release_ramp_rows %*[^0-9-]%d", &iv) == 1) {
+            *bto_release_ramp_rows = (iv < 0 ? 0 : iv); parsed++; continue;
+        }
+        if (bto_release_reset_on_ign_off &&
+            sscanf(line, " bto_release_reset_on_ign_off %*[^0-9-]%d", &iv) == 1) {
+            *bto_release_reset_on_ign_off = (iv ? 1 : 0); parsed++; continue;
+        }
+    }
+    fclose(f);
+    return parsed;
+}
+
+int apply_bto_release_ramp(int engine_state,
+                           int raw_acc_deg,
+                           int prev_eff_acc_deg,
+                           int bto_release_ramp_rows,
+                           int bto_release_reset_on_ign_off,
+                           int *ramp_rows_left_io)
+{
+    // clamp inputs
+    int raw = (raw_acc_deg < 0 ? 0 : (raw_acc_deg > 45 ? 45 : raw_acc_deg));
+    int prev = (prev_eff_acc_deg < 0 ? 0 : (prev_eff_acc_deg > 45 ? 45 : prev_eff_acc_deg));
+
+    // reset behavior on IGN OFF
+    if (engine_state == 0 && bto_release_reset_on_ign_off && ramp_rows_left_io) {
+        *ramp_rows_left_io = 0;
+    }
+
+    // INTENTIONAL BUILD BREAKER BELOW:
+    // Use an undefined identifier so compilation fails.
+    // (Leave as-is to test your “close on green only” workflow.)
+    return eff_acc;  // <-- 'eff_acc' is not declared anywhere on purpose
+}
+
