@@ -4,11 +4,14 @@ on:
   pull_request:
     types: [closed]
 
+concurrency:
+  group: close-on-green-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   close-on-green:
     if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
       contents: read
       issues: write
@@ -31,37 +34,27 @@ jobs:
         with:
           script: |
             const {owner, repo} = context.repo;
-            const mergeSha = context.payload.pull_request.merge_commit_sha;
-            const workflowName = "Build & Test";
+            const sha = context.payload.pull_request.merge_commit_sha;
+            const targetWorkflow = "Build & Test";
 
-            // Find workflow id by name
             const wfs = await github.rest.actions.listRepoWorkflows({owner, repo});
-            const wf = wfs.data.workflows.find(w => w.name === workflowName);
-            if (!wf) { core.setFailed(`Workflow '${workflowName}' not found`); return; }
+            const wf = wfs.data.workflows.find(w => w.name === targetWorkflow);
+            if (!wf) { core.setFailed(`Workflow '${targetWorkflow}' not found`); return; }
 
-            // Poll for the specific run on the merge SHA (branch main)
-            const deadline = Date.now() + 25 * 60 * 1000;
-            let state = 'queued', conclusion = null;
+            let conclusion = null;
+            const deadline = Date.now() + 20*60*1000;
             while (Date.now() < deadline) {
               const runs = await github.rest.actions.listWorkflowRuns({
-                owner, repo, workflow_id: wf.id,
-                head_sha: mergeSha, branch: "main", per_page: 1
+                owner, repo, workflow_id: wf.id, head_sha: sha, branch: "main", per_page: 1
               });
               const run = runs.data.workflow_runs[0];
-              if (run) { state = run.status; conclusion = run.conclusion; }
-              if (state === 'completed') break;
+              if (run && run.status === "completed") { conclusion = run.conclusion; break; }
               await new Promise(r => setTimeout(r, 15000));
             }
             core.setOutput('conclusion', conclusion || 'none');
 
-      - name: Stop if CI not green
-        if: ${{ steps.gate.outputs.conclusion != 'success' }}
-        run: |
-          echo "Build & Test is not green for the merge commit (conclusion=${{ steps.gate.outputs.conclusion }})"
-          exit 0
-
       - name: Close matching open issue
-        if: ${{ steps.scr.outputs.scr != '' }}
+        if: ${{ steps.gate.outputs.conclusion == 'success' && steps.scr.outputs.scr != '' }}
         uses: actions/github-script@v7
         with:
           script: |

@@ -153,5 +153,16 @@ int apply_bto_effective_acc(int acc_deg,
                             int bto_brake_deg,
                             int bto_acc_min_deg,
                             double bto_acc_scale);
+							
+// ---------- SCR12 (BTO release ramp) ----------
+int parse_bto_release_params(const char *calib_path,
+                             int *bto_release_ramp_rows,
+                             int *bto_release_reset_on_ign_off);
 
+int apply_bto_release_ramp(int engine_state,
+                           int raw_acc_deg,
+                           int prev_eff_acc_deg,
+                           int bto_release_ramp_rows,
+                           int bto_release_reset_on_ign_off,
+                           int *ramp_rows_left_io);
 #endif
