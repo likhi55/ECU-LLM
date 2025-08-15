@@ -659,6 +659,8 @@ return e;
     return acc;
 }
 
+
+//line added
 // ======================== SCR12 (BTO release ramp) =========================
 // NOTE: This implementation is PURPOSELY ERRONEOUS to make CI fail for workflow testing.
 int parse_bto_release_params(const char *calib_path,
