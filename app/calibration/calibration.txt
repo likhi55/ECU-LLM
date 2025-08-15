@@ -50,3 +50,7 @@ rev_cut_cooldown_rows = 2
 bto_brake_deg = 10
 bto_acc_min_deg = 5
 bto_acc_scale = 0.0
+
+# SCR12 — BTO release ramp
+bto_release_ramp_rows = 3
+bto_release_reset_on_ign_off = 1
